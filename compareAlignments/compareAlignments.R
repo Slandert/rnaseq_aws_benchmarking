@@ -15,10 +15,12 @@ sampList <- c(samples.meta$samp)
 
 #tx2geneFromGTF returns a DataFrame of S4Vectors
 #This is needed for tximport to convert transcripts to matching genes
-tx2geneFromGTF <- function(gtf){
+tx2geneFromGTF <- function(gtf.file){
 
-  ensDbFromGtf(gtf='Homo_sapiens.GRCh38.88.gtf.gz')
-  edb <- EnsDb("Homo_sapiens.GRCh38.88.sqlite")
+  ensDbFromGtf(gtf=gtf.file)
+  gs <- gsub(pattern = '.gtf.gz',replacement = '', gtf.file)
+  sqlite <- cat(gs, '.sqlite',sep = '')
+  edb <- EnsDb(sqlite)
 
   Tx.ensemble <- transcripts(edb, columns = c("tx_id", "gene_id", "gene_name"), return.type = "DataFrame")
   tx2gene <- Tx.ensemble[,c(1,2)]
@@ -40,6 +42,8 @@ generateTPMTable <- function(
   {
   file.list <- list.dirs(path = sample.dir, full.names=TRUE, recursive = FALSE)
   file.list <- mixedsort(file.list)
+  
+  #This should probably be a dictionary, but I'm keeping it this way for now in case of later alignment tools having more complex directory structures.
   
   if(align.tool == "rsem"){
     file.list <- file.path(file.list, "Quant.genes.results")
@@ -115,6 +119,6 @@ dat <- signalCalibrate(mat.list, cellInfo, batInfo, evaluationFeature, calibrati
 
 plotSD(dat, ylim=c(0,1.4))
 
-
-
+#6/2/2017 To-do: Implement other rnaseqcomp plots, which require a differential expression analysis to calculate fold-changes
+#6/2/2017 To-do: Explore and implement other (reasonably established) means of comparing accuracy, variance, etc.
 
