@@ -1,17 +1,18 @@
 source("https://bioconductor.org/biocLite.R")
 biocLite('tximportData')
+biocLite('tximport')
+biocLite('EnsDb.Hsapiens.v86')
 
 library(dplyr)
+library(readr)
 library(tximportData)
 library(tximport)
 library(EnsDb.Hsapiens.v86)
 library(gtools)
+library(rnaseqcomp)
 
 #sample_metadata.csv is a metadata table containing the sample names, batch, ID, etc.
 samples.meta <- read.csv('sample_metadata.csv')
-
-samples$samp <- paste0('sample', samples.meta$samp)
-sampList <- c(samples.meta$samp)
 
 #tx2geneFromGTF returns a DataFrame of S4Vectors
 #This is needed for tximport to convert transcripts to matching genes
@@ -71,14 +72,13 @@ generateTPMTable <- function(
   return(counts)
 }
 
-rsem.counts <- consolidateSampleCounts('download-data/', align.tool = 'rsem', tx2gene)
-kallisto.counts <- consolidateSampleCounts('kallisto_output/', align.tool = 'kallisto', tx2gene)
-salmon.counts <- consolidateSampleCounts('salmon_output/', align.tool = 'salmon', tx2gene)
+rsem.counts <- generateTPMTable('../AlignmentOutput/rsem_output/', align.tool = 'rsem', tx2gene)
+kallisto.counts <- generateTPMTable('../AlignmentOutput/kallisto_output/', align.tool = 'kallisto', tx2gene)
+salmon.counts <- generateTPMTable('../AlignmentOutput/salmon_output/', align.tool = 'salmon', tx2gene)
 
 #Joining count tables to limit dataset to shared genes
-rsem.kallisto.counts <- inner_join(rsem.counts, kallisto.counts, by = "row.names")
+rsem.kallisto.counts <- inner_join(rsem.counts, kallisto.counts, by = "gene_name")
 rsem.kallisto.salmon.counts <- inner_join(rsem.kallisto.counts, salmon.counts, by = "gene_name")
-length.rsem.kallisto.salmon.counts <- inner_join(rsem.kallisto.salmon.counts, gene.length)
 
 #Retrieving list of housekeeping genes from simdata dataset
 #Subset from: https://www.ncbi.nlm.nih.gov/pubmed/23810203
@@ -92,15 +92,26 @@ housek <- housek %>% mutate(meta.gene = gsub("\\.[0-9]+","", meta.gene))
 names(housek) <- c("gene_name", "house")
 house.rsem.kallisto.salmon.counts <- unique(left_join(rsem.kallisto.salmon.counts, housek))
 
+#true.fc <- df.simdata
+#true.fc <- true.fc[,c("meta.gene", "meta.positive", "meta.fcsign", "meta.fcstatus")]
+#true.fc <- true.fc %>% mutate(meta.gene = gsub("\\.[0-9]+","", meta.gene))
+
+true.fc <- simdata$meta
+true.fc <- true.fc[,c("gene", "positive", "fcsign", "fcstatus")]
+true.fc <- true.fc %>% mutate(gene = gsub("\\.[0-9]+","", gene))
+names(true.fc) <- c("tx", "gene_name", "positive", "fcsign", "fcstatus")
+
+true.house.align.counts <- unique(left_join(true.fc, house.rsem.kallisto.salmon.counts))
+
 #Input into signalCalibrate requires a list of matrices of equal size, 1 for each tool
-rsem.mat <- data.matrix(house.rsem.kallisto.salmon.counts[,c(3:32)], rownames.force=TRUE)
-rownames(rsem.mat) <- house.rsem.kallisto.salmon.counts$gene_name
+rsem.mat <- data.matrix(true.house.align.counts[,c(3:32)], rownames.force=TRUE)
+rownames(rsem.mat) <- true.house.align.counts$gene_name
 
-kallisto.mat <- data.matrix(house.rsem.kallisto.salmon.counts[,c(34:63)], rownames.force=TRUE)
-rownames(kallisto.mat) <- house.rsem.kallisto.salmon.counts$gene_name
+kallisto.mat <- data.matrix(true.house.align.counts[,c(34:63)], rownames.force=TRUE)
+rownames(kallisto.mat) <- true.house.align.counts$gene_name
 
-salmon.mat <- data.matrix(house.rsem.kallisto.salmon.counts[,c(65:94)], rownames.force=TRUE)
-rownames(salmon.mat) <- house.rsem.kallisto.salmon.counts[,1]
+salmon.mat <- data.matrix(true.house.align.counts[,c(65:94)], rownames.force=TRUE)
+rownames(salmon.mat) <- true.house.align.counts$gene_name
 
 mat.list <- list(rsem.mat, kallisto.mat, salmon.mat)
 names(mat.list) <- c("rsem", "kallisto", "salmon")
@@ -111,14 +122,20 @@ batInfo <- factor(samples.meta$batch)
 #evaluationFeature = features being evaluated (in this case all)
 #calibrationFeature = features used for normalization between samples (in this case housekeeping genes)
 
-evaluationFeature <- rep(TRUE, nrow(rsem.kallisto.salmon.counts))
-calibrationFeature <- house.length.rsem.kallisto.salmon.counts$house
+evaluationFeature <- rep(TRUE, nrow(true.house.align.counts))
+calibrationFeature <- true.house.align.counts$house
 unitReference = 1
 
 dat <- signalCalibrate(mat.list, cellInfo, batInfo, evaluationFeature, calibrationFeature, unitReference, calibrationFeature2 = calibrationFeature)
 
-plotSD(dat, ylim=c(0,1.4))
+plotSD(dat, ylim=c(0,0.5))
 
-#6/2/2017 To-do: Implement other rnaseqcomp plots, which require a differential expression analysis to calculate fold-changes
-#6/2/2017 To-do: Explore and implement other (reasonably established) means of comparing accuracy, variance, etc.
+plotNE(dat,xlim=c(0.5,1))
+
+plotROC(dat,simdata$meta$positive,simdata$meta$fcsign,ylim=c(0,0.8))
+
+#6/5/2017:  For ROC, needed the 'true' expression status of genes (for FPR, etc).  Confused how this was derived for the demo set,
+#6/5/2017: so I used the demo set, which had limited overlap (~3000).  The plots appear to work, but the differences are very minute,
+#6/5/2017: probably because of very high sample count and low feature count.  
+#6/5/2017: To-do: Puzzle out how they derived 'true' expression status and repeat it for a larger set of our genes.
 
