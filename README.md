@@ -19,5 +19,3 @@ Comparison of aligner output:
 
 compareAlignments/compareAlignments.R
 
-6/5/17 to-do:  Add script for installation of tools, directory structuring.
-6/5/17 to-do:  Flesh out Readme.md and wiki.
